@@ -78,7 +78,7 @@ void AddPack(char *Newdata,char *data, int len)//给消息包加头
 		Newdata[i + 4] = data[i];
 	}
 }
-void SendMessage(Account& nAccount,int fd)//单独发送消息
+int SendMessage(Account& nAccount,int fd)//单独发送消息
 {
 	char p[1024],pp[1024];
 	memset(p,'\0',sizeof p);
@@ -88,8 +88,14 @@ void SendMessage(Account& nAccount,int fd)//单独发送消息
 	AddPack(pp, p, sz);
 	sz += 4;
 	char* ptr = pp;
+	long long T = Gettime();
 	while(sz > 0)
 	{
+		long long now = Gettime();
+		if(now - T > 2)
+		{
+			return -1;
+		}
 		int written_bytes = send(fd, ptr, sz,0);
 		if(written_bytes < 0)
         {       
@@ -99,8 +105,6 @@ void SendMessage(Account& nAccount,int fd)//单独发送消息
         ptr += written_bytes;     
 	}
 }
-int fff=0;
-Account nsd;
 void epoll_servce(int listen_sock)
 {
 	int epoll_fd = epoll_create(256);
@@ -140,7 +144,6 @@ void epoll_servce(int listen_sock)
 				exit(2);
 			default:
 			{
-				cout<<read_num<<endl;
 				for(int i = 0; i < read_num; i++)
 				{
 					if(ret_ev[i].data.fd == listen_sock && (ret_ev[i].events & EPOLLIN))
@@ -201,15 +204,23 @@ void epoll_servce(int listen_sock)
 										{
 											if(fd == FD[1])//从DBServer发回来的
 											{
-												SendMessage(nAccount, nAccount.fd());//发回客户端
+												if(nAccount.move() == 2)
+												{
+													SendMessage(nAccount, nAccount.fd());//发回客户端
+												}
 												if(nAccount.move() == 1 && nAccount.flag() == true)//登录成功则发送发到GameServer
 												{
 													SendMessage(nAccount, FD[2]);//发送到GameServer
 												}
+												else SendMessage(nAccount, nAccount.fd());//发回客户端
 											}
 											else if(fd == FD[2])
 											{
-												SendMessage(nAccount, nAccount.fd());
+												if(nAccount.flag() == true)
+												{
+													SendMessage(nAccount, nAccount.fd());
+													SendMessage(nAccount, nAccount.fd());
+												}
 											}
 											else//从客户端发来的
 											{	
@@ -221,10 +232,12 @@ void epoll_servce(int listen_sock)
 										{
 											if(fd == FD[2])//从GameServer发来
 											{
+												if(nAccount.move() == 100)
+												{
+													epoll_ctl(epoll_fd, EPOLL_CTL_DEL, fd, NULL);
+													close(fd);
+												}
 												string str = nAccount.message();
-												if(str[0]=='S')cout<<"start"<<" ";
-												long long now=Gettime();
-												cout<<"OUT"<<nAccount.fd()<<" "<<nAccount.move()<<" "<<now<<endl;
 												SendMessage(nAccount, nAccount.fd());//发给客户端
 												int a[1] ={1};
 												setsockopt(FD[2], IPPROTO_TCP, TCP_QUICKACK, a, sizeof(int));
@@ -235,7 +248,6 @@ void epoll_servce(int listen_sock)
 												long long now=Gettime();
 												SendMessage(nAccount, FD[2]);
 												now=Gettime();
-												cout<<nAccount.fd()<<" "<<now<<endl;
 											}
 										}
 										MessageMap[fd] = "";
@@ -248,6 +260,7 @@ void epoll_servce(int listen_sock)
 										indexMap[fd] ++;
 									}
 								}
+								free(mem);//释放内存
 							}
 							else if(_s == 0)
 							{
@@ -290,3 +303,4 @@ int main()
     epoll_servce(epoll->listen_sock);
 	close(epoll->listen_sock);
 }
+
